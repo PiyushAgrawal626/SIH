@@ -1,0 +1,37 @@
+from datetime import datetime, timedelta
+import requests
+import os
+
+def generate_urls():
+
+    start_date = datetime(2023, 1, 1)
+    end_date = datetime(2023, 1, 31)
+
+    url_list = []
+    current_date = start_date
+
+    while current_date <= end_date:
+        dd_mm_yyyy = current_date.strftime('%d-%m-%Y')
+        yyyy_mm_dd = current_date.strftime('%Y-%m-%d')
+        url = f"https://npp.gov.in/public-reports/cea/daily/dgr/{dd_mm_yyyy}/dgr4-{yyyy_mm_dd}.pdf" # creating url with the general format for PDF containing each day's data
+        url_list.append(url)
+        current_date += timedelta(days=1) # incrementing date by 1
+
+    return url_list
+
+urls = generate_urls()
+output_dir = "pdf_downloads"
+
+if not os.path.exists(output_dir):  # Create the output directory if it doesn't exist
+    os.makedirs(output_dir)
+
+for url in urls:
+    response = requests.get(url)  # Send a GET request to the URL
+    if response.status_code == 200:   # 200 is the HTTP status code for a successful request
+        file_name = os.path.basename(url)
+        with open(os.path.join(output_dir, file_name), "wb") as f:
+            f.write(response.content) # Save the PDF file to the output directory
+        print(f"Downloaded {file_name}")
+    else:
+        print(f"Failed to download {url}")
+
