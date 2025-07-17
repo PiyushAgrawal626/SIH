@@ -1,37 +1,97 @@
-from datetime import datetime, timedelta
 import requests
 import os
+from datetime import datetime, timedelta
 
-def generate_urls():
 
-    start_date = datetime(2023, 1, 1)
-    end_date = datetime(2023, 1, 31)
+def get_financial_year(date):
+    if date.month >= 4:
+        return f"{date.year}-{date.year + 1}"
+    else:
+        return f"{date.year - 1}-{date.year}"
+
+
+def generate_urls(start_date, end_date):
+    if start_date > end_date:
+        print("Error: Start date cannot be after the end date.")
+        return []
 
     url_list = []
     current_date = start_date
-
     while current_date <= end_date:
-        dd_mm_yyyy = current_date.strftime('%d-%m-%Y')
-        yyyy_mm_dd = current_date.strftime('%Y-%m-%d')
-        url = f"https://npp.gov.in/public-reports/cea/daily/dgr/{dd_mm_yyyy}/dgr4-{yyyy_mm_dd}.pdf" # creating url with the general format for PDF containing each day's data
-        url_list.append(url)
-        current_date += timedelta(days=1) # incrementing date by 1
+        dd_mm_yy = current_date.strftime('%d.%m.%y')
+        month_yyyy = current_date.strftime('%B %Y')
+        financial_year = get_financial_year(current_date)
+
+        # Construct the URL
+        url = (
+            f"https://report.grid-india.in/ReportData/Daily%20Report/PSP%20Report/"
+            f"{financial_year}/{month_yyyy.replace(' ', '%20')}/{dd_mm_yy}_NLDC_PSP.pdf"
+        )
+        url_list.append((url, current_date))
+        current_date += timedelta(days=1)
 
     return url_list
 
-urls = generate_urls()
-output_dir = "pdf_downloads"
 
-if not os.path.exists(output_dir):  # Create the output directory if it doesn't exist
-    os.makedirs(output_dir)
+def main():
+    """
+    Main function to get user input, generate URLs, and download PDFs.
+    """
+    print("Enter the date range for which you want to download the PDF reports.")
 
-for url in urls:
-    response = requests.get(url)  # Send a GET request to the URL
-    if response.status_code == 200:   # 200 is the HTTP status code for a successful request
-        file_name = os.path.basename(url)
-        with open(os.path.join(output_dir, file_name), "wb") as f:
-            f.write(response.content) # Save the PDF file to the output directory
-        print(f"Downloaded {file_name}")
-    else:
-        print(f"Failed to download {url}")
+    while True:
+        try:
+            start_date_str = input("Enter the start date (YYYY-MM-DD): ")
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            break
+        except ValueError:
+            print("Invalid date format. Please use YYYY-MM-DD.")
 
+    while True:
+        try:
+            end_date_str = input("Enter the end date (YYYY-MM-DD): ")
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            break
+        except ValueError:
+            print("Invalid date format. Please use YYYY-MM-DD.")
+
+    urls_with_dates = generate_urls(start_date, end_date)
+
+    if not urls_with_dates:
+        print("No URLs generated. Please check the date range and try again.")
+        return
+
+    print("\nGenerated URLs:")
+    for url, _ in urls_with_dates:
+        print(url)
+
+    output_dir = "daily_elec_bills_of_india"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Some dates does not have data present, so we log them
+    failed_log_file = "failed_downloads.txt"
+
+    print(f"\nDownloading PDFs to '{output_dir}' directory...")
+    for url, date in urls_with_dates:
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                file_name = f"{date.strftime('%Y-%m-%d')}.pdf"
+                with open(os.path.join(output_dir, file_name), "wb") as f:
+                    f.write(response.content)
+                print(f"Downloaded {file_name}")
+            else:
+                error_message = f"Failed to download {os.path.basename(url)} (Status code: {response.status_code})"
+                print(error_message)
+                with open(failed_log_file, "a") as f:
+                    f.write(f"{url}\nReason: {error_message}\n\n")
+        except requests.exceptions.RequestException as e:
+            error_message = f"An error occurred while trying to download {os.path.basename(url)}: {e}"
+            print(error_message)
+            with open(failed_log_file, "a") as f:
+                f.write(f"{url}\nReason: {error_message}\n\n")
+
+
+if __name__ == "__main__":
+    main()

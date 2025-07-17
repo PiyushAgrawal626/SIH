@@ -1,38 +1,164 @@
+
 import os
 import pdfplumber
 import pandas as pd
 
+states = [
+    "J&K(UT) & Ladakh(UT)",
+    "Arunachal Pradesh",
+    "Andhra Pradesh",
+    "Chhattisgarh",
+    "West Bengal",
+    "Tamil Nadu",
+    "Uttarakhand",
+    "WR Maharashtra",
+    "SR Karnataka",
+    "ER Odisha",
+    "NER Meghalaya",
+    "Chandigarh",
+    "Jharkhand",
+    "Telangana",
+    "Puducherry",
+    "Sikkim",
+    "Manipur",
+    "Nagaland",
+    "Tripura",
+    "Gujarat",
+    "Haryana",
+    "Punjab",
+    "Rajasthan",
+    "Bihar",
+    "Delhi",
+    "Goa",
+    "MP",
+    "DVC",
+    "DD",
+    "DNH",
+    "HP",
+    "Kerala",
+    "Mizoram",
+    "Assam",
+    "NR UP",
+    "Essar steel"
+]
 
-def extract_delhi_values(pdf_path):
+# Sort states by length in descending order to prioritize longer matches
+states.sort(key=len, reverse=True)
+
+
+def extract_values(pdf_path):
+    extracted_data = []
     with pdfplumber.open(pdf_path) as pdf:
-        page = pdf.pages[1] # Required value is is page 2 of PDF
+        page = pdf.pages[1]  # Required value is in page 2 of the PDF
         text = page.extract_text()
         lines = text.split('\n')
         for line in lines:
-            if "Delhi" in line: # Search Delhi data
-                words = line.split()
-                max_demand_met = words[1] # Required data is in coulumn 2 and 4 on the row containing Delhi
-                energy_met = words[3]
-                return max_demand_met, energy_met
+            for state in states:  # Search for each state
+                if state in line:  # Search city data
+                    # Find the exact position of the state name in the line
+                    start_index = line.find(state)
+                    if start_index != -1:
+                        # Get the substring after the state name
+                        data_string = line[start_index + len(state):].strip()
+                        # Split by space and take the first 7 parts
+                        values = data_string.split()
+                        if len(values) >= 7:
+                            state_data = {
+                                "State": state,
+                                "Max Demand Met": values[0],
+                                "Shortage During Peak": values[1],
+                                "Energy Met": values[2],
+                                "Drawl Schedule": values[3],
+                                "OD(+) / UD(-)": values[4],
+                                "Max OD": values[5],
+                                "Energy Shortage": values[6]
+                            }
+                            extracted_data.append(state_data)
+                            break  # Move to the next line after finding a state in the current line
+    return extracted_data
 
-    return None, None # If not found
 
-output_dir = r"C:\Users\moham\Documents\PROGRAMMING\monthlyData"
-data = []
+# Dir containing the pdfs of extracted data
+output_dir = r"daily_elec_bills_of_delhi"
 
-for file_name in os.listdir(output_dir):# Iterate through each PDF in the directory
+# Get all unique dates from filenames
+all_dates_in_files = []
+for file_name in os.listdir(output_dir):
     if file_name.endswith(".pdf"):
-        pdf_path = os.path.join(output_dir, file_name)
-        max_demand_met, energy_met = extract_delhi_values(pdf_path)
-        if max_demand_met and energy_met: # If not null
-            date_str = file_name.split('_')[0]  # Extracting 'dd.mm.yy' part
-            date = pd.to_datetime(date_str, format='%d.%m.%y')
-            data.append([date, max_demand_met, energy_met]) # Apeending date and values to data list
+        try:
+            date_str = file_name.split('.')[0]  # Get 'YYYY-MM-DD'
+            date = pd.to_datetime(date_str, format='%Y-%m-%d')
+            all_dates_in_files.append(date)
+        except ValueError:
+            # Handle cases where filename might not be in expected date format
+            print(f"Skipping {file_name} due to unexpected date format.")
+            continue
 
-columns = ['Date', 'Max Demand Met (MW)', 'Energy Met (MU)']
-df = pd.DataFrame(data, columns=columns) # Convert the data list into a DataFrame
-df = df.sort_values(by='Date') # Sorting dataframe by date
-output_excel = r"C:\Users\moham\Documents\PROGRAMMING\delhi_data.xlsx" 
+if not all_dates_in_files:
+    print("No PDF files with valid date formats found in the directory.")
+    exit()
+
+min_date = min(all_dates_in_files)
+max_date = max(all_dates_in_files)
+full_date_range = pd.date_range(start=min_date, end=max_date, freq='D')
+
+# Create a MultiIndex for all possible Date-State combinations
+multi_index = pd.MultiIndex.from_product(
+    [full_date_range, states], names=['Date', 'State'])
+
+columns = [
+    "Max Demand Met",
+    "Shortage During Peak",
+    "Energy Met",
+    "Drawl Schedule",
+    "OD(+) / UD(-)",
+    "Max OD",
+    "Energy Shortage"
+]
+
+# Initialize an empty DataFrame with NaN values for all combinations
+# Use object dtype to allow NaN for mixed types
+df = pd.DataFrame(index=multi_index, columns=columns, dtype=object)
+
+# Iterate through each PDF in the directory
+for file_name in os.listdir(output_dir):
+    if file_name.endswith(".pdf"):
+        try:
+            date_str = file_name.split('.')[0]  # Get 'YYYY-MM-DD'
+            current_date = pd.to_datetime(date_str, format='%Y-%m-%d')
+        except ValueError:
+            continue  # Skip files with invalid date format
+
+        pdf_path = os.path.join(output_dir, file_name)
+        daily_extracted_data = extract_values(pdf_path)
+
+        for state_data in daily_extracted_data:
+            state = state_data["State"]
+            # Populate the DataFrame using .loc for specific Date-State combination
+            df.loc[(current_date, state),
+                   "Max Demand Met"] = state_data["Max Demand Met"]
+            df.loc[(current_date, state),
+                   "Shortage During Peak"] = state_data["Shortage During Peak"]
+            df.loc[(current_date, state),
+                   "Energy Met"] = state_data["Energy Met"]
+            df.loc[(current_date, state),
+                   "Drawl Schedule"] = state_data["Drawl Schedule"]
+            df.loc[(current_date, state),
+                   "OD(+) / UD(-)"] = state_data["OD(+) / UD(-)"]
+            df.loc[(current_date, state), "Max OD"] = state_data["Max OD"]
+            df.loc[(current_date, state),
+                   "Energy Shortage"] = state_data["Energy Shortage"]
+        print(f"Processed {file_name}")
+
+# Reset index to make Date and State regular columns
+df = df.reset_index()
+
+# Remove time portion from the 'Date' column
+df['Date'] = df['Date'].dt.normalize()
+
+# Sort by Date and then by State
+df = df.sort_values(by=['Date', 'State']).reset_index(drop=True)
+
+output_excel = r"combined_delhi_data.xlsx"  # Output Excel file path
 df.to_excel(output_excel, index=False)  # Saving to excel
 print(f"Data has been saved to {output_excel}")
-
